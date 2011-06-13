@@ -1,11 +1,11 @@
-Name:		     SVM
+Name:		     Hank
 Version:             0.0.1
-Description:         SVM tester
+Description:         SVM tester program
 License:             AllRightsReserved
 License-file:        LICENCE
 Category:            AI, Graphics, Machine Vision
 Synopsis:            Test
-Description:            SVM library tester.
+Description:            Test project.
 
 Author:              Heikki Salo
 Maintainer:          heikki.ao.salo@iki.fi
@@ -13,7 +13,7 @@ Build-Type:          Simple
 Cabal-Version:       >=1.6
 
 Executable           hank
-    main-is:         main.hs
+    main-is:         hank.hs
     extra-libraries: svm,opencv_calib3d,opencv_contrib,opencv_core,opencv_features2d,
                      opencv_highgui,opencv_imgproc,opencv_legacy,opencv_ml,opencv_objdetect,
                      opencv_video
