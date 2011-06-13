@@ -1,0 +1,21 @@
+Name:		     SVM
+Version:             0.0.1
+Description:         SVM tester
+License:             AllRightsReserved
+License-file:        LICENCE
+Category:            AI, Graphics, Machine Vision
+Synopsis:            Test
+Description:            SVM library tester.
+
+Author:              Heikki Salo
+Maintainer:          heikki.ao.salo@iki.fi
+Build-Type:          Simple
+Cabal-Version:       >=1.6
+
+Executable           hank
+    main-is:         main.hs
+    extra-libraries: svm,opencv_calib3d,opencv_contrib,opencv_core,opencv_features2d,
+                     opencv_highgui,opencv_imgproc,opencv_legacy,opencv_ml,opencv_objdetect,
+                     opencv_video
+    Build-Depends:   haskell98, base >= 3 && < 5, bindings-DSL >= 1.0.9, bindings-svm >= 0.1.0,
+                     CV >= 0.3, split >= 0.1.3, vector >= 0.7.0.1, filepath >= 1.2.0.0
