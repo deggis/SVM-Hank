@@ -2,7 +2,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module SVM (train) where
+module SVM (train,saveModel,predict) where
 
 import Bindings.SVM
 import System.IO.Unsafe
@@ -35,6 +35,9 @@ svm_parameters = C'svm_parameter
 
 node = SVec.unsafeToForeignPtr $ SVec.fromList ([1,1,-1,-1]::[CDouble])
 
+type Model = Ptr C'svm_model
+type Nodes = Ptr C'svm_node
+
 parseEntryClass :: String -> Double
 parseEntryClass row = eval $ classStr row
   where
@@ -49,7 +52,8 @@ parseEntryNodes row = pairs
     pairs    = map (\i->(read (i!!0)::Int, read (i!!1)::Double)) $ map (\s->splitOn ":" s) cellStrs
 
 -- Indices in ascending order, ending -1 index is added
-createEntryCNodes :: [(Int,Double)] -> Ptr C'svm_node
+-- TODO: enforce ordering
+createEntryCNodes :: [(Int,Double)] -> Nodes
 createEntryCNodes pairs = unsafePerformIO $ MA.newArray $ (map createCNode pairs)++[endingNode]
   where
     endingNode = createCNode (-1,0) -- spec: last node must be (-1,?)
@@ -66,8 +70,8 @@ createCNode (index,value) = C'svm_node
   , c'svm_node'value     = realToFrac value :: CDouble
   }
 
-train :: [(Double, [(Int, Double)])] -> String -> IO ()
-train trainData modelFileName = do
+train :: [(Double, [(Int, Double)])] -> Model 
+train trainData = unsafePerformIO $ do
   classes <- MA.newArray $ (map (realToFrac.fst) trainData :: [CDouble])
   allNodeArrays <- MA.newArray $ map (createEntryCNodes.snd) trainData
   svm_problem <- return $ C'svm_problem
@@ -75,18 +79,18 @@ train trainData modelFileName = do
     , c'svm_problem'y = classes
     , c'svm_problem'x = allNodeArrays
     }
-  model <- with svm_problem $ \svm_problem' ->
-             with svm_parameters $ \svm_parameters' ->
-               c'svm_train svm_problem' svm_parameters'
-  outputfile <- newCString modelFileName
+  with svm_problem $ \svm_problem' ->
+    with svm_parameters $ \svm_parameters' ->
+      c'svm_train svm_problem' svm_parameters'
+
+saveModel :: Model -> String -> IO ()
+saveModel model file = do
+  outputfile <- newCString file
   _ <- c'svm_save_model outputfile model
   return ()
 
-main = do
-  file <- readFile "heart_scale"
-  datarows <- return $ lines file
-  classes <- return $ map parseEntryClass datarows
-  datas <- return $ map parseEntryNodes datarows
-  trainData <- return $ zip classes datas 
-  train trainData "output"
-  return ()
+predict :: Model -> [(Int,Double)] -> Double
+predict model nodes' = realToFrac $ unsafePerformIO $ c'svm_predict model nodes
+  where
+    nodes = createEntryCNodes nodes'
+
