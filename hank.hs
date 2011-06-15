@@ -51,20 +51,20 @@ main' = do
     class1_data <- packFeatures 1    class1_regions
     class2_data <- packFeatures (-1) class2_regions
 
-    trainData <- return $ concat [class1_data, class2_data]
+    trainData <- return $ simpleScaleWClasses $ concat [class1_data, class2_data]
 
     model <- return $ train trainData
     saveModel model (fn++".hank.model.txt")
     regions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) coords
-    vals <- return $ map imageFeatures regions
+    vals <- return $ simpleScale $ map (createVector.imageFeatures) regions
     writeFile (fn++".hank.values.txt") $ concat $ map ((++"\n").createGPlotStr) vals
-    predictions <- return $ map ((predict model).createVector) vals
+    predictions <- return $ map (predict model) $ vals
     montages <- return $ map (\v->(empty (10,10) :: Image GrayScale D32) <# rectOp (realToFrac v) (-1) (0,0) (10,10) ) predictions
     saveImage (fn++".hank.predict.jpg") $ montage (10,10) 0 montages
     return ()
   where
     saveMontages fn ms       = saveImage fn $ montage (length ms,1) 1 ms
-    packFeatures cls regions = return $ zip (repeat cls) $ map (createVector.imageFeatures) regions
-    createGPlotStr vals      = tail $ foldl (\acc v->concat [acc, " ", show v]) "" vals
+    packFeatures cls regions = return $ zip (repeat (cls::Double)) $ map (createVector.imageFeatures) regions
+    createGPlotStr vals      = tail $ foldl (\acc (k,v)->concat [acc, " ", show v]) "" vals
 
 main = main'
