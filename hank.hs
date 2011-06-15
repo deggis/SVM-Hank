@@ -4,62 +4,67 @@ import System
 import System.FilePath
 import CV.Image
 import CV.Textures
+import CV.Haralick
 import CV.ImageOp
 import CV.Drawing
+import CV.ColourUtils
+import qualified CV.ImageMath as CVIM
+import Data.List.Split
+import System.IO.Unsafe
 
 import SVM
 
-createVector :: HaralickFeatures -> [(Int, Double)]
-createVector hf = concat [asmV, entropyV, contrastV]--, correlationV]
-  where
-    asmV         = zip [1..4]   $ asms hf
-    entropyV     = zip [5..8]   $ entropies hf
-    contrastV    = zip [8..12]  $ contrasts hf
---    correlationV = zip [13..16] $ correlations hf
+createVector :: [Double] -> [(Int, Double)]
+createVector features = zip [1..] features
 
-createGPlotStr :: HaralickFeatures -> String
-createGPlotStr hf = (show asmV)++" "++(show contrastV) --, correlationV]
+readCoords :: String -> IO [(Int,Int)]
+readCoords file = do
+    file <- readFile file
+    lns <- return $ lines file
+    return $ map read' lns 
   where
-    asmV         = 0.25 * (sum $ asms hf)
-    contrastV    = 0.25 * (sum $ contrasts hf)
+    read' s = read s :: (Int,Int)
+
+imageFeatures :: Image GrayScale D32 -> [Double]
+imageFeatures im = unsafePerformIO $ do
+    co_occ <- return $ coOccurenceMatrix (0,0) $ unsafeImageTo8Bit $ im
+    contr <- contrast co_occ 256
+    ang <- angularSecondMoment co_occ 256
+    avg <- return $ (realToFrac.CVIM.average) im
+    return $ [contr, ang, avg]
 
 main' = do
     args <- getArgs
-    Just im <- loadImage (args !! 0 :: FilePath)
+    fn <- return $ args !! 0
+    Just im' <- loadImage fn
+    im <- return $ stretchHistogram im'
     coords <- return $ [ (x,y) | y <- [0,10..90], x <- [0,10..90] ]
-    skyCoords <- return $ take 10 coords
-    forestCoords <- return $ take 10 $ drop 70 coords
+    class1Coords <- readCoords $ fn++".class1.txt"
+    class2Coords <- readCoords $ fn++".class2.txt"
 
-    skyRegions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) skyCoords
-    forestRegions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) forestCoords
+    class1_regions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) class1Coords
+    class2_regions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) class2Coords
 
-    skyData    <- return $ zip (repeat 1)    $ map (createVector.calculateHaralickFeatures) skyRegions
-    forestData <- return $ zip (repeat (-1)) $ map (createVector.calculateHaralickFeatures) forestRegions
-    trainData <- return $ concat [skyData, forestData]
+    saveImage (fn++".hank.class1.jpg") $ montage (length class1_regions,1) 1 class1_regions
+    saveImage (fn++".hank.class2.jpg") $ montage (length class2_regions,1) 1 class2_regions
+
+    class1_data <- packFeatures 1    class1_regions
+    class2_data <- packFeatures (-1) class2_regions
+
+    trainData <- return $ concat [class1_data, class2_data]
+
     model <- return $ train trainData
-    saveModel model ((args !! 0)++".model")
+    saveModel model (fn++".hank.model.txt")
     regions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) coords
-    haralickVals <- return $ map (\i->calculateHaralickFeatures i) regions
-    predictions <- return $ map ((predict model).createVector) haralickVals
+    vals <- return $ map imageFeatures regions
+    writeFile (fn++".hank.values.txt") $ concat $ map ((++"\n").createGPlotStr) vals
+    predictions <- return $ map ((predict model).createVector) vals
     montages <- return $ map (\v->(empty (10,10) :: Image GrayScale D32) <# rectOp (realToFrac v) (-1) (0,0) (10,10) ) predictions
-    saveImage ((args !! 0)++".predict.jpg") $ montage (10,10) 0 montages
+    saveImage (fn++".hank.predict.jpg") $ montage (10,10) 0 montages
     return ()
+  where
+    saveMontages fn ms       = saveImage fn $ montage (length ms,1) 1 ms
+    packFeatures cls regions = return $ zip (repeat cls) $ map (createVector.imageFeatures) regions
+    createGPlotStr vals      = tail $ foldl (\acc v->concat [acc, " ", show v]) "" vals
 
-{-
-mainDatas = do
-    args <- getArgs
-    Just im <- loadImage (args !! 0 :: FilePath)
-    coords <- return $ [ (x,y) | y <- [0,10..90], x <- [0,10..90] ]
-    skyCoords <- return $ take 10 coords
-    forestCoords <- return $ take 10 $ drop 70 coords
-
-    skyRegions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) skyCoords
-    forestRegions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) forestCoords
-
-    skyData    <- return $ map ("1 "++)    $ map (createGPlotStr.calculateHaralickFeatures) skyRegions
-    forestData <- return $ map ("-1 "++)   $ map (createGPlotStr.calculateHaralickFeatures) forestRegions
-    trainData <- return $ concat [skyData, forestData]
-    mapM_ putStrLn trainData
-    return ()
--}
 main = main'
