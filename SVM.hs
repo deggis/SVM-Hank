@@ -2,7 +2,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module SVM (train,saveModel,predict) where
+module SVM (train,saveModel,predict,simpleScale,simpleScaleWClasses) where
 
 import Bindings.SVM
 import System.IO.Unsafe
@@ -69,6 +69,25 @@ createCNode (index,value) = C'svm_node
   { c'svm_node'index     = (fromIntegral index) :: CInt
   , c'svm_node'value     = realToFrac value :: CDouble
   }
+
+simpleScaleWClasses :: [(Double, [(Int, Double)])] -> [(Double, [(Int, Double)])] 
+simpleScaleWClasses unscaled = zip classes $ simpleScale datas
+  where
+    (classes,datas) = unzip unscaled
+
+-- Scale data to [0.0,1.0] feature by feature
+simpleScale :: [[(Int, Double)]] -> [[(Int, Double)]] 
+simpleScale unscaled = map process unscaled
+  where
+    process datas = map (\(k,v)->(k,apply k v)) datas
+    feature fn    = map (\d->snd $ head $ filter (\(k,v)->k==fn) d) unscaled
+    apply fn val  = (val-(min' fn))/(max' fn-min' fn)
+    min' fn       = norm' $ max minval $ minimum $ feature fn -- Getting rid of -Infinity
+    max' fn       = norm' min maxval $ maximum $ feature fn -- and +Infinity
+    minval        = -100000
+    maxval        = 100000
+    norm' d       = d --if (isNaN d) then 0.0 else d
+
 
 train :: [(Double, [(Int, Double)])] -> Model 
 train trainData = unsafePerformIO $ do
