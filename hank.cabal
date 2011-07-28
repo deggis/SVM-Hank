@@ -1,16 +1,16 @@
-Name:		     Hank
-Version:             0.0.1
-Description:         SVM tester program
-License:             AllRightsReserved
-License-file:        LICENCE
-Category:            AI, Graphics, Machine Vision
-Synopsis:            Test
-Description:            Test project.
-
-Author:              Heikki Salo
-Maintainer:          heikki.ao.salo@iki.fi
-Build-Type:          Simple
-Cabal-Version:       >=1.6
+Name:		    Hank
+Version:        0.5
+Description:    SVM tester program
+License:        MIT
+License-file:   LICENSE
+Category:       AI, Graphics, Machine Vision
+Synopsis:       Test
+Description:    A study on using Haralick texture features and SVM to
+    classify images.
+Author:         Heikki Salo
+Maintainer:     heikki.ao.salo@iki.fi
+Build-Type:     Simple
+Cabal-Version:  >=1.6
 
 Executable           hank
     main-is:         hank.hs
