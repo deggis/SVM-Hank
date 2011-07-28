@@ -2,69 +2,113 @@ module Main where
 
 import System
 import System.FilePath
+import System.IO.Unsafe
+import Data.List.Split
+import Foreign.Marshal.Array
+import qualified Data.Vector.Storable as V
+import qualified Data.Array.CArray as CA
+import Data.Array.IArray
+import Control.Parallel.Strategies
+
+import AI.SVM.Simple
+import AI.SVM.Base
+
 import CV.Image
 import CV.Textures
+import CV.Conversions
+import qualified CV.Transforms as CV
 import CV.Haralick
 import CV.ImageOp
 import CV.Drawing
 import CV.ColourUtils
 import qualified CV.ImageMath as CVIM
-import Data.List.Split
-import System.IO.Unsafe
 
-import SVM
-
-createVector :: [Double] -> [(Int, Double)]
-createVector features = zip [1..] features
-
-readCoords :: String -> IO [(Int,Int)]
-readCoords file = do
-    file <- readFile file
-    lns <- return $ lines file
-    return $ map read' lns 
-  where
-    read' s = read s :: (Int,Int)
+import qualified Scaling as S
 
 imageFeatures :: Image GrayScale D32 -> [Double]
 imageFeatures im = unsafePerformIO $ do
-    co_occ <- return $ coOccurenceMatrix (0,0) $ unsafeImageTo8Bit $ im
-    contr <- contrast co_occ 256
-    ang <- angularSecondMoment co_occ 256
-    avg <- return $ (realToFrac.CVIM.average) im
-    return $ [contr, ang, avg]
+    coOccMs <- return $ map (\d->coOccurenceMatrix d i') ds
+    contrs <- return $ map (\co->contrast co 256) coOccMs
+    angs <- return $ map (\co->angularSecondMoment co 256) coOccMs
+    avg <- return $ [(realToFrac.CVIM.average) im]
+    return $ concat [avg, contrs, angs]
+  where
+    i' = unsafeImageTo8Bit im
+    ds = [(1,0),(1,1),(0,1),(-1,1)] --0,45,90,135'
 
-main' = do
+
+getRegions :: Int -> [(Int,Int)] -> Image GrayScale D32 -> [Image GrayScale D32]
+getRegions d regions i = map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (d,d) i) regions
+
+dataRowToStr :: (Int,V.Vector Double) -> String
+dataRowToStr (classN,vec) = unwords $ (show classN):dataString
+  where
+    datas = zip [1..] $ V.toList vec
+    dataString = map (\(i,v)->show i++":"++show v) datas
+
+printStats :: [Int] -> [Int] -> FilePath -> String -> IO ()
+printStats predictions corrects fn method = putStrLn $ unwords ["Image", fn, "classification correctness with", method, ":", show amount, "%"]
+  where
+    nCorrect = fromIntegral $ foldl (\a (p,c)->if (p==c) then (a+1) else a) 0 $ zip predictions corrects
+    amount   = (nCorrect / (fromIntegral $ length predictions)) * 100
+
+
+main = do
     args <- getArgs
     fn <- return $ args !! 0
     Just im' <- loadImage fn
     im <- return $ stretchHistogram im'
-    coords <- return $ [ (x,y) | y <- [0,10..90], x <- [0,10..90] ]
-    class1Coords <- readCoords $ fn++".class1.txt"
-    class2Coords <- readCoords $ fn++".class2.txt"
 
-    class1_regions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) class1Coords
-    class2_regions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) class2Coords
+    (ranges,trainData) <- let bgClassCoords   = [ (x,y) | y <- [0,10..90], x <- [0,10..90], not (x<50 && y>40) ]
+                              boxClassCoords  = [ (x,y) | y <- [0,10..90], x <- [0,10..90], x<50 && y>40 ]
+                              bgClassRegions  = getRegions 10 bgClassCoords im
+                              boxClassRegions = getRegions 10 boxClassCoords im
+                              bgClassData'    = extractFeatures bgClassRegions
+                              boxClassData'   = extractFeatures boxClassRegions
+                              ranges          = S.calcRanges $ concat [bgClassData', boxClassData']
+                              bgClassData     = S.scaleUsingRanges bgClassData' ranges
+                              boxClassData    = S.scaleUsingRanges boxClassData' ranges
+                              bgClassVectors  = createSVMVectors  1   bgClassData
+                              boxClassVectors = createSVMVectors (-1) boxClassData
+                              trainData       = concat [take 10 bgClassVectors, take 10 boxClassVectors]
+                          in return $ (ranges,trainData)
+--    mapM_ (putStrLn.dataRowToStr) trainData
 
-    saveImage (fn++".hank.class1.jpg") $ montage (length class1_regions,1) 1 class1_regions
-    saveImage (fn++".hank.class2.jpg") $ montage (length class2_regions,1) 1 class2_regions
+    (c,gamma) <- return $ (2048.0, 0.0078125)
+--    (c,gamma) <- return $ (1,1)
+    (msg,svm) <- return $ trainClassifier (C c) (RBF gamma) trainData
+    putStrLn msg
 
-    class1_data <- packFeatures 1    class1_regions
-    class2_data <- packFeatures (-1) class2_regions
+    -- method 1
+    _ <- let regions         = getRegions 10 [(x,y) | y <- [0,10..90], x <- [0,10..90]] im
+             features        = extractFeatures regions
+             scaledFeatures  = S.scaleUsingRanges features ranges
+             vectors         = map V.fromList scaledFeatures
+             predictions     = map (classify svm) vectors
+             colorSq c       = rectOp (realToFrac c) (-1) (0,0) (10,10) 
+             montages        = map (\v->(empty (10,10) :: Image GrayScale D32) <# colorSq v) predictions
+             image           = montage (10,10) 0 montages
+             fn1             = (dropExtension fn)++"_method1.bmp"
+             correctValues   = [ if (x<50 && y>40) then (-1) else 1 | y <- [0,10..90], x <- [0,10..90]]
+          in (saveImage fn1 image) >> printStats predictions correctValues fn1 "method 1"
 
-    trainData <- return $ simpleScaleWClasses $ concat [class1_data, class2_data]
+    -- method 2
+    _ <- let regions         = getRegions 11 [(x,y) | y <- [0..89], x <- [0..89]] im
+             features        = extractFeatures regions
+             scaledFeatures  = S.scaleUsingRanges features ranges
+             vectors         = map V.fromList scaledFeatures
+             predictions :: [Int]
+             predictions     = map (classify svm) vectors
+             arska           = listArray ((0,0),(89,89)) $ map fromIntegral predictions
+             image           = CV.flip CV.Vertical $ CV.flip CV.Horizontal $ copyCArrayToImage arska
+             fn2             = (dropExtension fn)++"_method2.bmp"
+             correctValues   = [ if (x<45 && y>44) then (-1) else 1 | y <- [0..89], x <- [0..89]]
+          in (saveImage fn2 image) >> printStats predictions correctValues fn2 "method 2"
 
-    model <- return $ train trainData
-    saveModel model (fn++".hank.model.txt")
-    regions <- return $ map (\(x,y)->getRegion (fromIntegral x, fromIntegral y) (10,10) im) coords
-    vals <- return $ simpleScale $ map (createVector.imageFeatures) regions
-    writeFile (fn++".hank.values.txt") $ concat $ map ((++"\n").createGPlotStr) vals
-    predictions <- return $ map (predict model) $ vals
-    montages <- return $ map (\v->(empty (10,10) :: Image GrayScale D32) <# rectOp (realToFrac v) (-1) (0,0) (10,10) ) predictions
-    saveImage (fn++".hank.predict.jpg") $ montage (10,10) 0 montages
     return ()
   where
-    saveMontages fn ms       = saveImage fn $ montage (length ms,1) 1 ms
-    packFeatures cls regions = return $ zip (repeat (cls::Double)) $ map (createVector.imageFeatures) regions
-    createGPlotStr vals      = tail $ foldl (\acc (k,v)->concat [acc, " ", show v]) "" vals
+    extractFeatures :: [Image GrayScale D32] -> [[Double]]
+    extractFeatures regions     = map imageFeatures regions
+    createSVMVectors :: Int -> [[Double]] -> [(Int, V.Vector Double)]
+    createSVMVectors classN datas = zip (repeat classN) $ map (V.fromList) datas
 
-main = main'
