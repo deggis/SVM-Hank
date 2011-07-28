@@ -1,0 +1,30 @@
+
+SVM Hank
+========
+
+A study on using Haralick texture features and SVM to classify images.
+Implemented with Haskell.
+
+See report/report.pdf for more details.
+
+
+Installation
+------------
+
+Requires Haskell environment. You can get one at:
+
+  http://hackage.haskell.org/platform/
+
+
+git clone git://github.com/deggis/svmhank.git
+cd svmhank
+cabal install
+
+If everything goes fine, you should now have executable 'hank'.
+
+
+Author
+------
+
+Heikki Salo
+heikki.ao.salo@iki.fi
