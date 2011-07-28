@@ -16,8 +16,8 @@ Requires Haskell environment. You can get one at:
   http://hackage.haskell.org/platform/
 
 
-git clone git://github.com/deggis/svmhank.git
-cd svmhank
+git clone git://github.com/deggis/SVM-Hank.git
+cd SVM-Hank
 cabal install
 
 If everything goes fine, you should now have executable 'hank'.
